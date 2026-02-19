@@ -1,0 +1,27 @@
+{
+  "private": true,
+  "name": "InstaVolume",
+  "description": "Volume control for Instagram web videos - Reels & Feed",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": {
+    "name": "InstaVolume",
+    "url": "https://github.com/instavolume"
+  },
+  "devDependencies": {
+    "@jest/globals": "^30.2.0",
+    "extension": "^3.6.3",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0"
+  },
+  "scripts": {
+    "dev": "extension dev",
+    "start": "extension start",
+    "build": "extension build",
+    "build:firefox": "extension build --browser firefox",
+    "build:edge": "extension build --browser edge",
+    "test": "jest --verbose",
+    "test:watch": "jest --watch"
+  },
+  "packageManager": "npm@11.8.0"
+}
