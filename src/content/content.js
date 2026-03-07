@@ -35,6 +35,9 @@ const { VolumeController } = require('./volume-controller.js');
 
         // Also retry hiding native mute button separately (it may appear later)
         hideNativeMuteWithRetry(controller, video);
+
+        // Inject timeline seekbar (retries until container appears)
+        injectTimelineWithRetry(controller, video);
     });
 
     detector.scan();
@@ -69,8 +72,23 @@ function injectWithRetry(controller, video, volume, muted, attempt = 0) {
 }
 
 /**
+ * Inject timeline seekbar with retries.
+ */
+function injectTimelineWithRetry(controller, video, attempt = 0) {
+    const MAX = 20;
+    const DELAY = 300;
+
+    if (attempt >= MAX) return;
+    if (controller._timelineInstances.has(video)) return;
+
+    const injected = controller.injectTimeline(video);
+    if (injected) return;
+
+    setTimeout(() => injectTimelineWithRetry(controller, video, attempt + 1), DELAY);
+}
+
+/**
  * Hide Instagram's native mute button with retries.
- * It may appear later than the video itself.
  */
 function hideNativeMuteWithRetry(controller, video, attempt = 0) {
     const MAX = 20;

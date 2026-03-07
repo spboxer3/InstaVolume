@@ -11,6 +11,7 @@
 const { VolumeState } = require('./volume-state.js');
 const { VideoDetector } = require('./video-detector.js');
 const { VolumeControlUI } = require('./volume-control-ui.js');
+const { TimelineUI } = require('./timeline-ui.js');
 
 class VolumeController {
     constructor() {
@@ -19,6 +20,7 @@ class VolumeController {
         this._muted = false;
         this._volumeState = new VolumeState();
         this._uiInstances = new Map();
+        this._timelineInstances = new Map();
         this._muteButtonsHidden = new WeakSet();
     }
 
@@ -94,15 +96,36 @@ class VolumeController {
     }
 
     /**
+     * Detect video context type by walking the DOM parent chain.
+     * - 'post': inside an <article> tag (feed post)
+     * - 'story': on /stories/ URL and NOT inside <article>
+     * - 'reel': everything else (reels, explore, etc.)
+     */
+    _detectVideoType(video) {
+        let el = video;
+        while (el && el !== document.body) {
+            if (el.tagName === 'ARTICLE') return 'post';
+            el = el.parentElement;
+        }
+        if (window.location.pathname.startsWith('/stories/')) return 'story';
+        return 'reel';
+    }
+
+    /**
      * Inject volume control UI.
      * Priority: find native mute btn → hide it + insert ours before it.
      * Fallback: absolute overlay at bottom-right.
+     *
+     * For Stories, the mute button is NOT inside the video container —
+     * it's in the header area. We search the whole story viewer or
+     * use SVG aria-label to find it.
      */
     injectUI(video) {
         const container = this._findVideoContainer(video);
         if (!container) return false;
         if (container.querySelector('.instavolume-container')) return true;
 
+        const videoType = this._detectVideoType(video);
         const ui = new VolumeControlUI();
         const el = ui.createElement();
 
@@ -130,21 +153,47 @@ class VolumeController {
             }
         });
 
-        // Try to replace native mute button
-        const nativeBtn = this._findMuteButton(container);
+        // Try to find & replace native mute button
+        // For stories: search broader scope (story viewer or document)
+        // For posts/reels: search within video container
+        const nativeBtn = this._findNativeMuteButton(video, container, videoType);
+
         if (nativeBtn) {
             nativeBtn.style.setProperty('display', 'none', 'important');
             this._muteButtonsHidden.add(nativeBtn);
             nativeBtn.parentNode.insertBefore(el, nativeBtn);
         } else {
-            // Fallback: absolute overlay — match Instagram's native button inset
+            // Fallback: absolute overlay
             el.classList.add('instavolume-overlay');
+            if (videoType === 'story') {
+                el.classList.add('instavolume-overlay-story');
+            }
             const pos = window.getComputedStyle(container).position;
             if (pos === 'static') container.style.position = 'relative';
             container.appendChild(el);
         }
 
         this._uiInstances.set(video, ui);
+
+        // Also inject timeline
+        this.injectTimeline(video);
+
+        return true;
+    }
+
+    /**
+     * Inject timeline seekbar as a fixed-position overlay on document.body.
+     * Uses getBoundingClientRect() to track the video's position in real-time,
+     * so it works regardless of Instagram's DOM nesting or overflow.
+     */
+    injectTimeline(video) {
+        if (this._timelineInstances.has(video)) return true;
+
+        const timeline = new TimelineUI(video);
+        const el = timeline.createElement();
+        document.body.appendChild(el);
+
+        this._timelineInstances.set(video, timeline);
         return true;
     }
 
@@ -152,15 +201,59 @@ class VolumeController {
     hideSiblingMuteButton(video) {
         const container = this._findVideoContainer(video);
         if (!container) return null;
-        const btn = this._findMuteButton(container);
+        const videoType = this._detectVideoType(video);
+        const btn = this._findNativeMuteButton(video, container, videoType);
         if (!btn || this._muteButtonsHidden.has(btn)) return null;
         btn.style.setProperty('display', 'none', 'important');
         this._muteButtonsHidden.add(btn);
         return btn;
     }
 
-    /** Find Instagram's audio/mute button using many possible selectors */
-    _findMuteButton(container) {
+    /**
+     * Find the native mute button.
+     * Strategy differs by video type:
+     * - Post/Reel: search inside the video container (overlay sibling)
+     * - Story: the mute button is in the header/top area, NOT inside
+     *   the video container. We search using SVG aria-label in a broader
+     *   scope, or walk up from the video to find the story viewer section.
+     */
+    _findNativeMuteButton(video, container, videoType) {
+        // Strategy 1: search container (works for posts & reels)
+        const btn = this._findMuteButtonInScope(container);
+        if (btn) return btn;
+
+        // Strategy 2 (story): search the overlay sibling of the video
+        // Instagram stories: video.nextElementSibling is the overlay div
+        const overlay = video.nextElementSibling;
+        if (overlay && overlay.tagName === 'DIV') {
+            const btn2 = this._findMuteButtonInScope(overlay);
+            if (btn2) return btn2;
+        }
+
+        // Strategy 3 (story): search broader - walk up several levels
+        // Story mute button is typically in a header section above the video
+        if (videoType === 'story') {
+            // Walk up 5-8 levels from the video to find the story viewer root
+            let parent = video;
+            for (let i = 0; i < 8 && parent; i++) {
+                parent = parent.parentElement;
+            }
+            if (parent) {
+                const btn3 = this._findMuteButtonInScope(parent);
+                if (btn3) return btn3;
+            }
+
+            // Strategy 4: use SVG aria-label to find the mute icon globally
+            // in the story viewer
+            const btn4 = this._findMuteButtonBySvg();
+            if (btn4) return btn4;
+        }
+
+        return null;
+    }
+
+    /** Search for mute button within a given scope element */
+    _findMuteButtonInScope(scope) {
         const selectors = [
             'button[aria-label="Toggle audio"]',
             'button[aria-label="Audio is muted"]',
@@ -174,16 +267,37 @@ class VolumeController {
             'button[aria-label="取消靜音"]',
         ];
         for (const sel of selectors) {
-            const btn = container.querySelector(sel);
+            const btn = scope.querySelector(sel);
             if (btn) return btn;
         }
         // Broad fallback: any button with audio-related aria-label
-        for (const btn of container.querySelectorAll('button[aria-label]')) {
+        for (const btn of scope.querySelectorAll('button[aria-label]')) {
             const label = (btn.getAttribute('aria-label') || '').toLowerCase();
             if (label.includes('audio') || label.includes('mute') || label.includes('sound') ||
                 label.includes('音') || label.includes('靜')) {
                 return btn;
             }
+        }
+        return null;
+    }
+
+    /**
+     * Find mute button via SVG aria-label (for stories).
+     * The story mute button often contains an SVG with aria-label like
+     * "Audio is muted" inside a [role="button"] or <button> element.
+     */
+    _findMuteButtonBySvg() {
+        const svgLabels = [
+            'Audio is muted', 'Audio is playing', 'Audio',
+            '音訊已靜音', '音訊播放中', '切換音訊',
+            'Ton stummgeschaltet', 'Ton wird abgespielt',
+        ];
+        for (const label of svgLabels) {
+            const svg = document.querySelector(`svg[aria-label="${label}"]`);
+            if (!svg) continue;
+            // Walk up to find the clickable button parent
+            const btn = svg.closest('[role="button"]') || svg.closest('button') || svg.closest('[type="button"]');
+            if (btn) return btn;
         }
         return null;
     }
@@ -204,6 +318,8 @@ class VolumeController {
     destroy() {
         this._videos.clear();
         this._uiInstances.clear();
+        this._timelineInstances.forEach((t) => t.destroy());
+        this._timelineInstances.clear();
     }
 }
 

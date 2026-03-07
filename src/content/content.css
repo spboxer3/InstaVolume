@@ -8,15 +8,22 @@
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  z-index: 9999;
+  z-index: 9999 !important;
   bottom: 8px;
   right: 8px;
-  /* Fallback overlay mode */
 }
 
 .instavolume-container.instavolume-overlay {
   position: absolute !important;
+}
 
+/* Story mode: position bottom-right, above the reply bar,
+   to avoid conflicting with Instagram's native header controls */
+.instavolume-container.instavolume-overlay-story {
+  position: absolute !important;
+  top: auto;
+  bottom: 80px;
+  right: 16px;
 }
 
 /* --- Slider wrapper: inline (no gap), expands from height 0 on hover --- */
@@ -156,4 +163,61 @@
 
 .instavolume-slider::-moz-range-thumb:hover {
   transform: scale(1.3);
+}
+
+/* ============================================
+   Timeline / Seekbar
+   ============================================ */
+
+/* --- Timeline wrapper: fixed overlay, pointer-events pass through
+       so the volume control underneath remains clickable --- */
+.instavolume-timeline {
+  position: fixed !important;
+  z-index: 9998 !important;
+  padding: 0;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* --- Seekbar: only this part captures clicks --- */
+.instavolume-timeline-bar {
+  position: relative;
+  height: 3px;
+  margin: 0;
+  background: rgba(255, 255, 255, 0.35);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: height 0.15s ease;
+}
+
+.instavolume-timeline-bar:hover {
+  height: 6px;
+}
+
+.instavolume-timeline-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: #fff;
+  pointer-events: none;
+  width: 0%;
+}
+
+.instavolume-timeline-thumb {
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 14px;
+  height: 14px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  transition: transform 0.15s ease;
+}
+
+.instavolume-timeline-bar:hover .instavolume-timeline-thumb {
+  transform: translate(-50%, -50%) scale(1);
 }
